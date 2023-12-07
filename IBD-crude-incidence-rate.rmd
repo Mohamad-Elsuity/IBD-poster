@@ -1,0 +1,160 @@
+---
+title: "IBD crude incidence calculation"
+author: "Mohmad A. Mohamad"
+date: "2023-12-06"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Reference paper**
+
+We tried to simulate the claculation of crude incidence rate for IBD
+across different ethnic groups from the following paper:
+
+Misra R, Limdi J, Cooney R, Sakuma S, Brookes M, Fogden E, Pattni S,
+Sharma N, Iqbal T, Munkholm P, Burisch J, Arebi N. Ethnic differences in
+inflammatory bowel disease: Results from the United Kingdom inception
+cohort epidemiology study. World J Gastroenterol. 2019 Oct
+28;25(40):6145-6157. doi: 10.3748/wjg.v25.i40.6145. PMID: 31686769;
+PMCID: PMC6824277.
+
+**Statistical methodology in reference paper**
+
+Crude incidence rates were calculated according to the following
+equation:
+
+Crude incidence rate = No. of cases/ Population at risk
+
+Confidence intervals were calculated assuming a Poisson distribution:
+
+95% CI = Incidence rate ± 1.96 x (Incidence rate / sqrt(Number of
+cases))
+
+For example, for the crude IBD incidence rate:
+
+Incidence rate = 17.0 per 100,000, Number of cases = 339 Plugging this
+into the formula: 95% CI = 17.0 ± 1.96 x (17.0 / sqrt(339))
+
+95% CI = 17.0 ± 7.3
+
+Giving a 95% confidence interval of 17.0 (7.3 - 26.7)
+
+**Our Statistical methodology**
+
+We retrieved IBD No. of cases and total population at risk from the
+reference population and tried to replicate the calculations using EpiR
+package
+
+**1. Estimation of crude incidence rates with CI**
+
+```{r IBD crude}
+#| echo: TRUE
+#| message: false
+# Load required packages
+library(epiR)
+library(ggplot2)
+library(readxl)
+library(tidyverse)
+library(rstatix)
+library(ggpubr)
+
+# Load required data
+data <- read_xlsx("IBD.xlsx")
+
+# Make Ethnic groups as factor
+data$`Ethnic group` <- factor(data$`Ethnic group`, levels = 
+                      c("Total population", "White European",
+                        "Indian", "Pakistani", "Others"))
+
+# Create a matrix of cases and population at risk
+tmp<- as.matrix(cbind(data$Cases,data$`Population at risk`))
+
+# Calculate crude IR, CI
+# add calculated column to the data
+data <- cbind(data,epi.conf(tmp, ctype = "inc.rate", method = "exact", N = 1000, design = 1, conf.level = 0.95) * 100000)
+
+print(data)
+
+```
+
+**2. Compare incidence rates using pairwise Chi-Square test**
+
+```{r compare}
+#| echo: TRUE
+#| message: false
+# Add column for control
+data <- mutate(data, Control= `Population at risk`-Cases)
+
+# Create contingency table
+xtab <- data %>% select(Cases, Control)
+dimnames(xtab) <- list(`Ethnic group`= data$`Ethnic group`, IBD= c("Cases", "Control"))
+
+# Pairwise comparisons
+prop.test <- pairwise_prop_test(xtab)
+print(prop.test)
+```
+
+**3. Make bar chart**
+
+```{r bar chart,fig.cap='Crude incidence rates across different ethnic groups'}
+#| echo: TRUE
+#| message: false
+# add a column with Ethnic group labels
+prop.test <- prop.test %>% mutate(`Ethnic group`= group1)
+
+# Exclude total population from the comparsion
+prop.test.short <- prop.test %>% filter(group1 !=" Total population") %>%
+  filter(group2 != "Total population")
+                                                                                     
+# Make a bar chart
+ggplot(data, aes(x = `Ethnic group`, y = est, fill=`Ethnic group`)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.9), width = 0.25) +
+  labs(title = "",
+       x = "Ethnic Group",
+       y = "Crude incidence rate (per 100,000)") +
+  geom_text(aes(label = round(est, digits=2)), nudge_y = 1, nudge_x=0.1, hjust="left", angle=45 ) +
+theme_minimal() +
+
+# add p values
+  stat_pvalue_manual(prop.test.short, label="p = {scales::pvalue(p.adj)}",
+  y.position = 38, step.increase = 0.1 , hide.ns = TRUE)
+
+```
+
+```{r print chart}
+#| echo: False
+#| message: False
+png("Crude chart.png",res=300, width = 5500, height= 3500, pointsize=36 )
+# Make a bar chart
+ggplot(data, aes(x = `Ethnic group`, y = est, fill=`Ethnic group`)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.9), width = 0.25) +
+  labs(title = "",
+       x = "Ethnic Group",
+       y = "Crude incidence rate (per 100,000)") +
+  geom_text(aes(label = round(est, digits=2)), nudge_y = 1, nudge_x=0.1, hjust="left", angle=45, size=6 ) +
+
+# add p values
+  stat_pvalue_manual(prop.test.short, label="p = {scales::pvalue(p.adj)}",
+  y.position = 38, step.increase = 0.1, hide.ns = TRUE,
+  size= 6, color= "darkblue") +
+
+# adjust text
+theme(
+  plot.title = element_text(face = "bold", size = 24),
+  axis.title.x = element_text(face = "bold", size = 28),
+  axis.title.y = element_text(face = "bold", size = 28),
+  axis.text.x = element_text(face = "bold", size = 20),
+  axis.text.y = element_text(face = "bold", size = 20),
+  legend.title = element_text(face = "bold", size = 30),
+  legend.text = element_text(face = "bold", size = 28)
+  )
+dev.off()
+```
